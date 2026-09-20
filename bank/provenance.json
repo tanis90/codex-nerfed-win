@@ -1,0 +1,25 @@
+{
+  "source": "https://github.com/xqy2006/ModelTrace",
+  "commit": "4438565f9aa158ffbe28cf7cf98ff637fe969812",
+  "file": "data/unified_bank.json",
+  "sha256": "6a3f7e4d703990a2322cf535020309380ca858654345d8fe5db278578568bad3",
+  "license": "MIT (see LICENSE-ModelTrace.txt)",
+  "bank_built_at": "2026-09-05T02:13:56.070726+00:00",
+  "models": [
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-6-astra",
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-6",
+    "claude-sonnet-5",
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5"
+  ],
+  "scorer": "pure-Python port of codex-plugin/modeltrace-guard/scripts/fingerprint-core.mjs (tests/fixtures keeps the original for parity checks)",
+  "prompts": "zh/en probe prompts adapted from codex-plugin/modeltrace-guard/scripts/prompts.mjs"
+}
