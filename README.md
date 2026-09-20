@@ -1,11 +1,6 @@
 # codex-nerfed-win
 
-> **English TL;DR** — A Windows CLI + Agent Skill that tells you whether the Codex model you selected is
-> actually the one answering. Zero-cost passive scanning of local Codex logs (model swaps, effort drops,
-> shrinking context windows) plus an optional ModelTrace fingerprint probe (the model is asked for ~300
-> "random" numbers; every model picks them with a characteristic bias). A `watch` mode builds a
-> MATCH→MISMATCH timeline so "it gets dumber as the session goes on" becomes data instead of a feeling.
-> Python 3.9+, stdlib only. Nothing leaves your machine except the probe's own inference.
+[English](README.en.md) · 简体中文
 
 你在 Codex 里选了一个模型。这套工具告诉你**实际回答的到底是不是它**。
 
