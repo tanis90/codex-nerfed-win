@@ -2,120 +2,95 @@
 
 [English](README.en.md) · 简体中文
 
-你在 Codex 里选了一个模型。这套工具告诉你**实际回答的到底是不是它**。
+你在 Codex 里选了一个模型，这个工具检查实际回答的是不是它。
 
-如果你遇到过"前几句话好好的，越聊越像降智"——`watch` 模式会把这种体感变成带时间戳的
-MATCH→MISMATCH 曲线。
+名字没变、脑子换了的情况真实存在：我在自己机器上选 gpt-6-astra 的 xhigh 档，指纹测出 gpt-5.6-luna，本地日志里却仍然写着 astra。日志只记"请求了什么"，指纹测的是"实际来了谁"。
 
-## 致敬 Credits
+## 功能
 
-本项目是从下面这些工作移植、搬运、组合而来，检测思路与代码质量全靠他们：
+`scan`：被动扫描，免费。Codex 每轮把模型、推理档、上下文窗口写进本地日志，scan 读这些文件，报出你没操作却变了的东西：模型被换、推理档被调低、内部模型跑了一轮、窗口缩水。断网也能跑。
 
-- **[kiyoakii/is-gpt-nerfed](https://github.com/kiyoakii/is-gpt-nerfed)**（MIT）— 源头项目。检测框架、
-  判定门（p≥80%/≤20%/0.5σ/≥2 采样）、被动扫描器的全部判定语义、`codex_appserver.py` 与
-  `modeltrace_core.py` 两个模块均来自它。上游是 macOS 菜单栏应用，作者在开发文档中说明
-  "Python 核心是可移植的，欢迎 Windows/Linux 支持"——本仓库就是这个 Windows 移植。
-- **[xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)**（MIT）— 指纹库与打分核心。
-  `bank/unified_bank.json` 与打分算法直接来自它（交叉验证三回答准确率 100%），许可见
-  `bank/LICENSE-ModelTrace.txt`。
-- **[hanlinwenyuan/hlwy-ai-checker](https://github.com/hanlinwenyuan/hlwy-ai-checker)** — 随机数指纹的
-  最初灵感（经 is-gpt-nerfed 致谢传递）。
+`probe`：指纹探测，一次消耗 2-3 条短消息额度。把目标会话临时 fork 一份（不落盘、不进你会话），让模型生成约 300 个随机数。每个模型选数字有固定偏好，和指纹库比对就知道实际是谁在答。探测会伪装成会话自己的客户端身份（Codex Desktop 等），避免服务端按客户端区别对待。
 
-如果这个工具对你有用，请去给上面三个项目点 star；给本仓库点 star 也可以，但先给他们。
+`watch`：持续监控。后台增量扫当前活跃会话，默认发现 hard 级变更才探测，平时零成本。判定序列记在 `timeline.jsonl`，"前几句正常、后面变笨"这件事有时间线可查。
 
-## 两条检测路径
-
-| 路径 | 命令 | 成本 | 原理 |
-| --- | --- | --- | --- |
-| 被动扫描 | `scan` | 零 token | Codex 每轮都把所用模型/推理档/上下文窗口写进本地 rollout 日志，扫描并标出一切"未经你操作就变了"的记录 |
-| 指纹探测 | `probe` | 约 2-3 次短回答 | 把目标会话临时 fork（ephemeral，不落盘、不污染原会话），让模型生成约 300 个"随机"数；模型选随机数有特征性偏好，与校准指纹库比对 |
-
-被动扫描分级：`hard`（模型被静默换、推理档被调低、隐藏内部模型跑了一轮、上下文窗口缩水）、
-`soft`（变更走了会话设置——"是你改的吗？"）、`good`（换到了更好的模型）、`info`（仅记录）。
+`doctor` / `sessions` / `report` / `explain --method`：环境自检、会话列表、汇总报告、指纹打分的数学原理。
 
 ## 安装
 
-要求：Windows + Python 3.9+（仅标准库）+ 已登录的 Codex（桌面版或 CLI 均可）。
+Windows + Python 3.9+（只用标准库）+ 已登录的 Codex（桌面版或 CLI）。
 
 ```bash
 git clone https://github.com/tanis90/codex-nerfed-win.git
 cd codex-nerfed-win
-python nerfed_win.py doctor    # 环境自检（不花额度）
+python nerfed_win.py doctor
 ```
 
-## 使用
+## 用法
 
 ```bash
-python nerfed_win.py doctor                        # 环境自检（不花额度）
-python nerfed_win.py sessions                      # 最近会话 + 模型/推理档
-python nerfed_win.py scan --hours 0                # 被动扫描全部历史（不花额度）
-python nerfed_win.py probe --thread <id前8位>      # 指纹探测某会话（花约 3 次短回答额度）
+python nerfed_win.py scan --hours 0                # 扫全部历史，免费
+python nerfed_win.py probe --thread <id前8位>      # 探测某个会话
 python nerfed_win.py probe --fresh --model gpt-6-astra --effort medium   # 探测此刻新会话
-python nerfed_win.py report                        # 汇总报告
-python nerfed_win.py explain --method              # 指纹打分的数学方法
+python nerfed_win.py report                        # 汇总
 ```
 
-### watch：抓"聊着聊着变笨"的现行
-
-被动扫描管日志里看得见的变更（模型名/推理档/窗口），指纹探测管"名字没变、脑子换了"。
-watch 把两者串成时间线：平时零成本增量扫当前活跃会话的日志，按策略自动指纹取证，
-判定序列记在 `~/.codex/nerfed-win/timeline.jsonl`。
+watch 的几种用法：
 
 ```bash
-python nerfed_win.py watch                                # 默认：发现 hard 级变更才探测（事件触发，平时零成本）
-python nerfed_win.py watch --probe-now                    # 启动先做一次基线探测
-python nerfed_win.py watch --probe-on turns:20            # 每 20 轮探一次（盯长会话降智）
-python nerfed_win.py watch --probe-on minutes:30          # 每 30 分钟活动量探一次
-python nerfed_win.py watch --probe-on off                 # 纯免费监听，永不探测
-python nerfed_win.py watch --thread <id> --interval 5     # 固定盯某个会话，5 秒轮询
-# 成本控制：--queries 2（默认）--cooldown 300 --max-probes 20
+python nerfed_win.py watch                                # 发现 hard 级变更才探测
+python nerfed_win.py watch --probe-on turns:20            # 每 20 轮探一次
+python nerfed_win.py watch --probe-on off                 # 纯免费监听
+python nerfed_win.py watch --probe-now                    # 启动先探一次基线
+# 控制成本：--queries 2（默认）--cooldown 300 --max-probes 20
 ```
 
-首次附着老会话只回放历史基线、不触发探测；Ctrl+C 退出落盘游标，重启续扫。
-单次探测是瞬时快照——路由抖动时连续两次探测可能一次 MATCH 一次 MISMATCH，看趋势请用时间线。
+单次探测是瞬时快照。路由抖动时连续两次探测可能一次 MATCH 一次 MISMATCH，看时间线，别看单点。
 
-### 作为 Agent Skill（zcode / kimi code 等）
+### 作为 Agent Skill
 
-把整个仓库目录复制进 agent 的 skills 目录（如 `~/.agents/skills/`），用户对 agent 说
-"检测一下我的 Codex 是不是降智了"，agent 会按 `SKILL.md` 的流程执行：先零成本扫描、
-征得同意再跑指纹探测、原样转达判定。
+把整个仓库目录复制进 agent 的 skills 目录（如 `~/.agents/skills/`），然后对 agent 说"检测一下我的 Codex 是不是降智了"。它会按 `SKILL.md` 先跑免费扫描，探测先征得你同意。
 
-## 判定结果
+## 判定
 
 | 判定 | 含义 |
 | --- | --- |
 | MATCH | 所选模型就在回答 |
-| MISMATCH | 高置信错配（downgrade 降智 / upgrade 偷偷升级 / lateral 同档换脑） |
-| SUSPICIOUS | 指纹有偏向但不够自信，维持观察 |
-| DOWNGRADED | Codex 自己的日志实锤（无需指纹） |
-| UNLISTED | 所选模型不在指纹库，只能说像谁 |
+| MISMATCH | 高置信错配：downgrade 降智 / upgrade 偷偷升级 / lateral 同档换脑 |
+| SUSPICIOUS | 指纹有偏向但置信度不够，等下次探测 |
+| DOWNGRADED | Codex 自己的日志实锤，无需指纹 |
+| UNLISTED | 所选模型不在指纹库，只能报"像谁" |
 | INVALID | 没采到有效样本，可重试一次 |
 
-MISMATCH 门槛与上游一致：p(top) ≥ 80% 且 p(所选) ≤ 20% 且融合分差 ≥ 0.5σ 且 ≥ 2 个有效回答。
+MISMATCH 的门槛与上游一致：p(top) ≥ 80%、p(所选) ≤ 20%、融合分差 ≥ 0.5σ、至少 2 个有效回答。
 
-## Windows 适配说明
+## Windows 适配了什么
 
-相对上游的改动集中在：
+- npm 装的 codex 是 `.CMD` shim，要经 `cmd.exe /c` 启动；不传 `--stdio`（旧版 CLI 不认这个参数，stdio 本来就是默认传输）
+- 优先用桌面版自带的新 codex 二进制，回退到 PATH
+- 大陆网络下探测自动找本地代理（Clash 系 7897/7890 等），`--proxy` 可指定；被动扫描完全离线
+- 默认排除 codex-auto-review 之类的内部线程，`--all` 可含
 
-- 探测进程启动：npm 装的 `codex` 是 `.CMD` shim，需经 `cmd.exe /c`；不传 `--stdio`（stdio 本来就是默认传输，旧版 CLI 反而不认这个参数）
-- 二进制选择：优先用桌面版自带的新版 codex（`AppData\Local\OpenAI\Codex\bin\*\codex.exe`），回退 PATH
-- 大陆网络：探测自动探测本地代理端口（Clash 系 7897/7890 等），`--proxy` 可显式指定；被动扫描完全离线
-- 客户端伪装：探测时读会话真实 originator（如 Codex Desktop）并伪装一致，避免服务端按客户端路由造成假阳性（上游同款做法）
-- 内部线程过滤：默认排除 Codex 自己的 `subagent`/`guardian_review` 线程（如 codex-auto-review），`--all` 可含
+## 局限
 
-## 局限（同上游）
-
-- "所选模型"指 Codex 请求的模型；若服务端换权重但保留模型名，只有指纹或上下文窗口变化能发现。
-- 指纹库是闭集（13 个模型），库外模型会映射到最相近的。
-- 指纹只能回答"现在是谁"，无法回溯历史会话当时是谁——本地日志只记请求侧。
-- 探测消耗账户额度；一次探测 = 2-3 个约 300 数字的短回答。
+- 指纹只回答"现在是谁"，回溯不了历史：当时的实际模型在本地没有留下可判定的数据
+- 指纹库是闭集（13 个模型），库外模型只能报最接近的
+- 探测消耗额度，一次等于 2-3 条短消息
 
 ## 隐私
 
-只读本机 `~/.codex`；探测记录写 `~/.codex/nerfed-win/`；除探测本身的推理外**无任何网络请求**
-（无遥测、无更新检查）。探测临时 fork 不落盘、不进原会话上下文。
+只读 `~/.codex`，记录写 `~/.codex/nerfed-win/`。除探测本身的推理外没有任何网络请求：无遥测，无更新检查。
+
+## 致谢
+
+这个项目站在三个项目上：
+
+- [kiyoakii/is-gpt-nerfed](https://github.com/kiyoakii/is-gpt-nerfed)（MIT）：源头。检测框架、判定门、扫描器语义、`codex_appserver.py` 和 `modeltrace_core.py` 两个模块都来自它。上游是 macOS 应用，作者在开发文档里写了"Python 核心可移植，欢迎 Windows 支持"，本仓库就是那份移植。
+- [xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)（MIT）：指纹库和打分核心，`bank/` 目录直接来自它，交叉验证三回答准确率 100%。
+- [hanlinwenyuan/hlwy-ai-checker](https://github.com/hanlinwenyuan/hlwy-ai-checker)：随机数指纹的最初想法（经 is-gpt-nerfed 致谢传递）。
+
+觉得有用的话，先给他们点 star，再给本仓库点。
 
 ## 许可
 
-MIT（见 `LICENSE`）。 vendored 文件各自的许可保留：`bank/LICENSE-ModelTrace.txt`（ModelTrace），
-`codex_appserver.py` / `modeltrace_core.py` 文件头的上游声明。
+MIT，见 `LICENSE`。vendored 文件保留上游许可：`bank/LICENSE-ModelTrace.txt`，以及 `codex_appserver.py` / `modeltrace_core.py` 文件头的声明。

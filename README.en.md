@@ -2,131 +2,123 @@
 
 English · [简体中文](README.md)
 
-You pick a model in Codex. This tool tells you whether that model is actually the one answering.
+You pick a model in Codex. This tool checks whether that model is actually the one answering.
 
-If you've ever felt "the first few replies are fine, then it gets dumber as the session goes on" —
-the `watch` mode turns that feeling into a timestamped MATCH→MISMATCH timeline.
+Same name, different brain happens for real: on my machine, selecting gpt-6-astra at xhigh effort
+fingerprinted as gpt-5.6-luna, while the local log still said astra. The log records what was
+*requested*; the fingerprint measures what showed up.
 
-## Credits
+## What it does
 
-This project is a port of, and heavily built on, the work below. The detection design and code
-quality are theirs:
+`scan`: passive scan, free. Codex writes the model, reasoning effort, and context window of every
+turn into local logs. scan reads those files and reports anything that changed without you changing
+it: a swapped model, a lowered effort, an internal model running a turn, a shrunken window. Works
+offline.
 
-- **[kiyoakii/is-gpt-nerfed](https://github.com/kiyoakii/is-gpt-nerfed)** (MIT) — the origin project.
-  The detection framework, the verdict gate (p≥80% / ≤20% / 0.5σ / ≥2 answers), the full semantics of
-  the passive scanner, and the vendored `codex_appserver.py` / `modeltrace_core.py` modules all come
-  from it. Upstream is a macOS menu bar app whose development notes say "the Python is portable" and
-  welcome Windows/Linux support — this repository is that Windows port.
-- **[xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)** (MIT) — the fingerprint bank and
-  scoring core. `bank/unified_bank.json` and the scoring algorithm come straight from it
-  (100% accuracy with three answers in cross-validation); license at `bank/LICENSE-ModelTrace.txt`.
-- **[hanlinwenyuan/hlwy-ai-checker](https://github.com/hanlinwenyuan/hlwy-ai-checker)** — the original
-  random-number fingerprint idea (credited via is-gpt-nerfed).
+`probe`: fingerprint probe, costs 2-3 short messages per run. It forks the target session
+temporarily (never written to disk, never enters your thread) and asks for ~300 random numbers.
+Every model picks numbers with a fixed bias; comparing against the fingerprint bank tells you who
+actually answered. The probe identifies itself as the session's own client (Codex Desktop etc.) so
+the server can't route it differently.
 
-If this tool is useful to you, star the three projects above first. Starring this repo is welcome too,
-but star them first.
+`watch`: continuous monitoring. Incrementally scans the active session in the background, probes
+only when a hard-severity finding appears, otherwise costs nothing. Verdicts go into
+`timeline.jsonl`, so "fine at first, dumber later" becomes a timeline instead of a feeling.
 
-## The two detection paths
-
-| path | command | cost | how it works |
-| --- | --- | --- | --- |
-| passive scan | `scan` | zero tokens | Codex records the model / reasoning effort / context window of every turn in local rollout logs; the scanner flags everything that changed without you changing it |
-| fingerprint probe | `probe` | ~2-3 short answers | forks the target session ephemerally (never written to disk, never pollutes your thread), asks for ~300 "random" numbers; every model picks them with a characteristic bias, compared against the calibrated bank |
-
-Passive-scan severities: `hard` (silent model swap, lowered reasoning effort, hidden internal model
-running a turn, shrunken context window), `soft` (the change went through thread settings — "was that
-you?"), `good` (moved to a better model), `info` (logged only).
+`doctor` / `sessions` / `report` / `explain --method`: environment check, session list, summary
+report, and the math behind the fingerprint.
 
 ## Install
 
-Requires: Windows + Python 3.9+ (stdlib only) + a signed-in Codex (desktop app or CLI).
+Windows + Python 3.9+ (stdlib only) + a signed-in Codex (desktop or CLI).
 
 ```bash
 git clone https://github.com/tanis90/codex-nerfed-win.git
 cd codex-nerfed-win
-python nerfed_win.py doctor    # environment self-check (free)
+python nerfed_win.py doctor
 ```
 
 ## Usage
 
 ```bash
-python nerfed_win.py doctor                        # environment self-check (free)
-python nerfed_win.py sessions                      # recent sessions + model/effort
-python nerfed_win.py scan --hours 0                # passive scan of all history (free)
-python nerfed_win.py probe --thread <first 8 of id>      # fingerprint-probe one session (~3 short answers)
-python nerfed_win.py probe --fresh --model gpt-6-astra --effort medium   # what a new session gets right now
-python nerfed_win.py report                        # summary report
-python nerfed_win.py explain --method              # the math behind the fingerprint
+python nerfed_win.py scan --hours 0                # scan all history, free
+python nerfed_win.py probe --thread <first 8 of id>      # probe one session
+python nerfed_win.py probe --fresh --model gpt-6-astra --effort medium   # what a new session gets now
+python nerfed_win.py report                        # summary
 ```
 
-### watch: catch "it gets dumber mid-session" in the act
-
-The passive scan covers changes visible in the logs (model name / effort / window); the fingerprint
-probe covers "same name, different brain". watch chains the two into a timeline: it incrementally
-scans the active session's log for free and probes automatically per your policy; the verdict
-sequence lands in `~/.codex/nerfed-win/timeline.jsonl`.
+watch variants:
 
 ```bash
-python nerfed_win.py watch                                # default: probe only on hard findings (event-triggered, free while quiet)
+python nerfed_win.py watch                                # probe only on hard findings
+python nerfed_win.py watch --probe-on turns:20            # probe every 20 turns
+python nerfed_win.py watch --probe-on off                 # free-only monitoring
 python nerfed_win.py watch --probe-now                    # one baseline probe at startup
-python nerfed_win.py watch --probe-on turns:20            # probe every 20 turns (watch a long session)
-python nerfed_win.py watch --probe-on minutes:30          # probe every 30 minutes of activity
-python nerfed_win.py watch --probe-on off                 # free-only monitoring, never probes
-python nerfed_win.py watch --thread <id> --interval 5     # pin one session, poll every 5 s
 # cost control: --queries 2 (default) --cooldown 300 --max-probes 20
 ```
 
-Attaching to an old session replays its history as a baseline without triggering probes; Ctrl+C
-persists the scan cursor and the next run resumes where it left off.
-A single probe is an instantaneous snapshot — under flapping routing, back-to-back probes can return
+A single probe is an instantaneous snapshot. Under flapping routing, back-to-back probes can return
 MATCH then MISMATCH. Read the timeline, not the single data point.
 
-### As an Agent Skill (zcode / kimi code, etc.)
+### As an Agent Skill
 
-Copy the whole repository folder into your agent's skills directory (e.g. `~/.agents/skills/`).
-Say "check whether my Codex got nerfed" and the agent follows `SKILL.md`: free scan first, fingerprint
-probe only with your consent, verdict relayed verbatim.
+Copy the whole repository folder into your agent's skills directory (e.g. `~/.agents/skills/`) and
+say "check whether my Codex got nerfed". It follows `SKILL.md`: free scan first, probe only with
+your consent.
 
 ## Verdicts
 
 | verdict | meaning |
 | --- | --- |
 | MATCH | the model you selected is the one answering |
-| MISMATCH | confident mismatch (downgrade / secret upgrade / lateral brain swap) |
-| SUSPICIOUS | the fingerprint leans elsewhere, not confidently enough; stands until the next probe |
+| MISMATCH | confident mismatch: downgrade / secret upgrade / lateral brain swap |
+| SUSPICIOUS | the fingerprint leans elsewhere, not confidently; wait for the next probe |
 | DOWNGRADED | Codex's own records show a silent switch; no fingerprint needed |
-| UNLISTED | your model is not in the bank; can only say who it resembles |
-| INVALID | no usable sample; you may retry once |
+| UNLISTED | your model is not in the bank; can only report who it resembles |
+| INVALID | no usable sample; retry once |
 
-The MISMATCH gate matches upstream: p(top) ≥ 80% and p(selected) ≤ 20% and a fused score margin
-≥ 0.5σ and at least 2 valid answers.
+The MISMATCH gate matches upstream: p(top) ≥ 80%, p(selected) ≤ 20%, a fused score margin ≥ 0.5σ,
+at least 2 valid answers.
 
-## Windows adaptations
+## What was adapted for Windows
 
-The changes relative to upstream concentrate on:
+- npm-installed codex is a `.CMD` shim and must launch through `cmd.exe /c`; `--stdio` is not passed
+  (older CLI builds reject the flag; stdio is the default transport anyway)
+- prefers the newer codex binary bundled with the desktop app, falls back to PATH
+- the probe auto-detects local proxies (Clash-family 7897/7890 …) for restricted networks;
+  `--proxy` overrides. Passive scanning is fully offline
+- Codex's internal threads (codex-auto-review and friends) are excluded by default; `--all` includes them
 
-- probe process launch: npm-installed `codex` is a `.CMD` shim and must go through `cmd.exe /c`; do not pass `--stdio` (stdio is the default transport, and older CLI builds reject the flag)
-- binary selection: prefer the newer codex bundled with the desktop app (`AppData\Local\OpenAI\Codex\bin\*\codex.exe`), fall back to PATH
-- restricted networks: the probe auto-detects local proxy ports (Clash-family 7897/7890 …); `--proxy` overrides. Passive scanning is fully offline
-- client impersonation: the probe reads the session's real originator (e.g. Codex Desktop) and identifies itself the same way, avoiding client-based-routing false positives (same approach as upstream)
-- internal-thread filtering: Codex's own `subagent` / `guardian_review` threads (e.g. codex-auto-review) are excluded by default; `--all` includes them
+## Limits
 
-## Limits (same as upstream)
-
-- "The model you selected" is the model Codex requested. If the server swaps the weights and keeps the
-  name, only the fingerprint or a context-window change can show it.
-- The bank is a closed set (13 models); a model outside it maps to its nearest look-alike.
-- The fingerprint answers "who is answering now"; it cannot retroactively identify who answered a
-  past session — local logs record only the request side.
-- Probes consume account quota: one probe = 2-3 short answers of ~300 numbers each.
+- The fingerprint answers "who is answering now"; it cannot identify who answered a past session —
+  that data was never recorded locally
+- The bank is a closed set (13 models); a model outside it maps to its nearest look-alike
+- Probes cost quota: one run equals 2-3 short messages
 
 ## Privacy
 
-Reads `~/.codex` only; probe records go to `~/.codex/nerfed-win/`; apart from the probe's own
-inference there are **no network requests at all** (no telemetry, no update checks). Probe forks are
-ephemeral: never written to disk, never injected into your thread.
+Reads `~/.codex` only; records go to `~/.codex/nerfed-win/`. Apart from the probe's own inference
+there are no network requests at all: no telemetry, no update checks.
+
+## Credits
+
+This project stands on three:
+
+- [kiyoakii/is-gpt-nerfed](https://github.com/kiyoakii/is-gpt-nerfed) (MIT): the origin. The
+  detection framework, the verdict gate, the scanner semantics, and the vendored
+  `codex_appserver.py` / `modeltrace_core.py` all come from it. Upstream is a macOS app whose
+  development notes say "the Python is portable" and welcome Windows support; this repository is
+  that port.
+- [xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace) (MIT): the fingerprint bank and
+  scoring core; the `bank/` directory comes straight from it (100% accuracy with three answers in
+  cross-validation).
+- [hanlinwenyuan/hlwy-ai-checker](https://github.com/hanlinwenyuan/hlwy-ai-checker): the original
+  random-number fingerprint idea (credited via is-gpt-nerfed).
+
+If this is useful to you, star those three first, then this one.
 
 ## License
 
-MIT — see `LICENSE`. Vendored files keep their upstream licenses: `bank/LICENSE-ModelTrace.txt`
-(ModelTrace), and the upstream notices in the headers of `codex_appserver.py` / `modeltrace_core.py`.
+MIT, see `LICENSE`. Vendored files keep their upstream licenses: `bank/LICENSE-ModelTrace.txt` and
+the notices in the headers of `codex_appserver.py` / `modeltrace_core.py`.
